@@ -71,38 +71,44 @@ def weights_init(m):
         m.bias.data.fill_(0)
 
 # Sample a random latent space vector
-def sample_z(shape=64, latent_dim=10, n_c=10, fix_class=-1, req_grad=False):
+def sample_z(shape=64, latent_dim=10, n_c=10, fix_class=-1, req_grad=False, device='cpu'):
 
-    assert (fix_class == -1 or (fix_class >= 0 and fix_class < n_c) ), "Requested class %i outside bounds."%fix_class
+    assert (fix_class == -1 or (fix_class >= 0 and fix_class < n_c)), \
+        "Requested class %i outside bounds." % fix_class
 
-    Tensor = torch.cuda.FloatTensor
-    
+    use_cuda = (device == 'cuda') or (hasattr(device, 'type') and device.type == 'cuda')
+    Tensor = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
+
     # Sample noise as generator input, zn
-    zn = Variable(Tensor(0.75*np.random.normal(0, 1, (shape, latent_dim))), requires_grad=req_grad)
+    zn = Variable(
+        Tensor(0.75 * np.random.normal(0, 1, (shape, latent_dim))),
+        requires_grad=req_grad
+    )
 
     ######### zc, zc_idx variables with grads, and zc to one-hot vector
     # Pure one-hot vector generation
     zc_FT = Tensor(shape, n_c).fill_(0)
     zc_idx = torch.empty(shape, dtype=torch.long)
 
-    if (fix_class == -1):
-        zc_idx = zc_idx.random_(n_c).cuda()
+    if fix_class == -1:
+        zc_idx = zc_idx.random_(n_c)
+        if use_cuda:
+            zc_idx = zc_idx.cuda()
         zc_FT = zc_FT.scatter_(1, zc_idx.unsqueeze(1), 1.)
-        #zc_idx = torch.empty(shape, dtype=torch.long).random_(n_c).cuda()
-        #zc_FT = Tensor(shape, n_c).fill_(0).scatter_(1, zc_idx.unsqueeze(1), 1.)
     else:
         zc_idx[:] = fix_class
         zc_FT[:, fix_class] = 1
 
-        zc_idx = zc_idx.cuda()
-        zc_FT = zc_FT.cuda()
+        if use_cuda:
+            zc_idx = zc_idx.cuda()
+            zc_FT = zc_FT.cuda()
 
     zc = Variable(zc_FT, requires_grad=req_grad)
 
     ## Gaussian-noisey vector generation
-    #zc = Variable(Tensor(np.random.normal(0, 1, (shape, n_c))), requires_grad=req_grad)
-    #zc = softmax(zc)
-    #zc_idx = torch.argmax(zc, dim=1)
+    # zc = Variable(Tensor(np.random.normal(0, 1, (shape, n_c))), requires_grad=req_grad)
+    # zc = softmax(zc)
+    # zc_idx = torch.argmax(zc, dim=1)
 
     # Return components of latent space variable
     return zn, zc, zc_idx

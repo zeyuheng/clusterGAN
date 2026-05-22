@@ -66,19 +66,24 @@ def main():
     n_c = train_df['n_classes'][0]
 
     cuda = True if torch.cuda.is_available() else False
+
+    if cuda:
+        device = torch.device('cuda:0')
+        print("Using GPU")
+    else:
+        device = torch.device('cpu')
+        print("Using CPU")
     
     # Load encoder model
     encoder = Encoder_CNN(latent_dim, n_c)
     enc_figname = os.path.join(models_dir, encoder.name + '.pth.tar')
-    encoder.load_state_dict(torch.load(enc_figname))
-    encoder.cuda()
+    encoder.load_state_dict(torch.load(enc_figname, map_location=device))
+    encoder = encoder.to(device)
     encoder.eval()
 
     # Configure data loader
     dataloader = get_dataloader(dataset_name=dataset_name, data_dir=data_dir, batch_size=n_samples, train_set=False)
     
-    Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-
     # Load TSNE
     if (perplexity < 0):
         tsne = TSNE(n_components=2, verbose=1, init='pca', random_state=0)
@@ -91,7 +96,7 @@ def main():
 
     # Get full batch for encoding
     imgs, labels = next(iter(dataloader))
-    c_imgs = Variable(imgs.type(Tensor), requires_grad=False)
+    c_imgs = Variable(imgs, requires_grad=False).to(device)
     
     # Encode real images
     enc_zn, enc_zc, enc_zc_logits = encoder(c_imgs)

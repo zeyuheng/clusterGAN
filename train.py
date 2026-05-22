@@ -95,8 +95,14 @@ def main():
     x_shape = (channels, img_size, img_size)
     
     cuda = True if torch.cuda.is_available() else False
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    torch.cuda.set_device(device_id)
+
+    if cuda:
+        device = torch.device(f'cuda:{device_id}')
+        torch.cuda.set_device(device_id)
+        print(f"Using GPU: cuda:{device_id}")
+    else:
+        device = torch.device('cpu')
+        print("Using CPU")
 
     # Loss function
     bce_loss = torch.nn.BCELoss()
@@ -104,17 +110,13 @@ def main():
     mse_loss = torch.nn.MSELoss()
     
     # Initialize generator and discriminator
-    generator = Generator_CNN(latent_dim, n_c, x_shape)
-    encoder = Encoder_CNN(latent_dim, n_c)
-    discriminator = Discriminator_CNN(wass_metric=wass_metric)
-    
-    if cuda:
-        generator.cuda()
-        encoder.cuda()
-        discriminator.cuda()
-        bce_loss.cuda()
-        xe_loss.cuda()
-        mse_loss.cuda()
+    generator = Generator_CNN(latent_dim, n_c, x_shape).to(device)
+    encoder = Encoder_CNN(latent_dim, n_c).to(device)
+    discriminator = Discriminator_CNN(wass_metric=wass_metric).to(device)
+
+    bce_loss = torch.nn.BCELoss().to(device)
+    xe_loss = torch.nn.CrossEntropyLoss().to(device)
+    mse_loss = torch.nn.MSELoss().to(device)
         
     Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
     
@@ -169,8 +171,9 @@ def main():
             
             # Sample random latent variables
             zn, zc, zc_idx = sample_z(shape=imgs.shape[0],
-                                      latent_dim=latent_dim,
-                                      n_c=n_c)
+                          latent_dim=latent_dim,
+                          n_c=n_c,
+                          device=device)
     
             # Generate a batch of images
             gen_imgs = generator(zn, zc)
@@ -199,7 +202,7 @@ def main():
                     v_loss = bce_loss(D_gen, valid)
                     ge_loss = v_loss + betan * zn_loss + betac * zc_loss
     
-                ge_loss.backward(retain_graph=True)
+                ge_loss.backward()
                 optimizer_GE.step()
 
             # ---------------------
@@ -207,6 +210,10 @@ def main():
             # ---------------------
     
             optimizer_D.zero_grad()
+
+            gen_imgs_detached = gen_imgs.detach()
+            D_gen_detached = discriminator(gen_imgs_detached)
+            D_real = discriminator(real_imgs)
     
             # Measure discriminator's ability to classify real from generated samples
             if wass_metric:
@@ -214,13 +221,15 @@ def main():
                 grad_penalty = calc_gradient_penalty(discriminator, real_imgs, gen_imgs)
 
                 # Wasserstein GAN loss w/gradient penalty
-                d_loss = torch.mean(D_real) - torch.mean(D_gen) + grad_penalty
+                d_loss = torch.mean(D_real) - torch.mean(D_gen_detached) + grad_penalty
                 
             else:
                 # Vanilla GAN loss
-                fake = Variable(Tensor(gen_imgs.size(0), 1).fill_(0.0), requires_grad=False)
+                fake = Variable(Tensor(gen_imgs_detached.size(0), 1).fill_(0.0), requires_grad=False)
+                valid = Variable(Tensor(real_imgs.size(0), 1).fill_(1.0), requires_grad=False)
+
                 real_loss = bce_loss(D_real, valid)
-                fake_loss = bce_loss(D_gen, fake)
+                fake_loss = bce_loss(D_gen_detached, fake)
                 d_loss = (real_loss + fake_loss) / 2
     
             d_loss.backward()
@@ -257,7 +266,8 @@ def main():
         ## Cycle through randomly sampled encoding -> generator -> encoder
         zn_samp, zc_samp, zc_samp_idx = sample_z(shape=n_samp,
                                                  latent_dim=latent_dim,
-                                                 n_c=n_c)
+                                                 n_c=n_c,
+                                                 device=device)
         # Generate sample instances
         gen_imgs_samp = generator(zn_samp, zc_samp)
         # Encode sample instances
@@ -291,7 +301,8 @@ def main():
             zn_samp, zc_samp, zc_samp_idx = sample_z(shape=n_c,
                                                      latent_dim=latent_dim,
                                                      n_c=n_c,
-                                                     fix_class=idx)
+                                                     fix_class=idx,
+                                                     device=device)
 
             # Generate sample instances
             gen_imgs_samp = generator(zn_samp, zc_samp)
